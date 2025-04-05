@@ -5,13 +5,13 @@ import { Button } from "@/components/ui/button";
 import { Slider } from "@/components/ui/slider";
 import { Play, Pause, Square, SkipForward, SkipBack } from "lucide-react";
 import { Progress } from "@/components/ui/progress";
-import * as speechsdk from "microsoft-cognitiveservices-speech-sdk";
+import { generateSpeech, formatTTSValue } from "@/lib/edge-tts";
 
 interface TTSControllerProps {
   dialogue: { speaker: string; text: string }[];
   voiceSettings: Record<
     string,
-    { voice: string; pitch: number; speed: number }
+    { voice: string; pitch: number; speed: number; accent?: string }
   >;
   onLineChange?: (lineIndex: number) => void;
   isPlaying?: boolean;
@@ -19,11 +19,6 @@ interface TTSControllerProps {
   onNextLine?: () => void;
   currentLine?: number;
 }
-
-// Speech synthesis API key and region
-// In a production app, these would be environment variables
-const speechKey = "YOUR_SPEECH_KEY"; // Replace with your actual key or use env variables
-const speechRegion = "eastus"; // Replace with your actual region
 
 const TTSController = ({
   dialogue = [],
@@ -47,15 +42,17 @@ const TTSController = ({
 
   const [progress, setProgress] = useState(0);
   const [volume, setVolume] = useState(80);
+  const [isLoading, setIsLoading] = useState(false);
 
-  // Refs for speech synthesis
-  const synthesizer = useRef<speechsdk.SpeechSynthesizer | null>(null);
-  const audioContext = useRef<AudioContext | null>(null);
+  // Ref for audio player
   const audioPlayer = useRef<HTMLAudioElement | null>(null);
+  const progressInterval = useRef<NodeJS.Timeout | null>(null);
 
   // Initialize audio player
   useEffect(() => {
     audioPlayer.current = new Audio();
+    audioPlayer.current.volume = volume / 100;
+
     audioPlayer.current.onended = () => {
       if (onNextLine) {
         onNextLine();
@@ -64,118 +61,91 @@ const TTSController = ({
       }
     };
 
+    audioPlayer.current.onpause = () => {
+      if (progressInterval.current) {
+        clearInterval(progressInterval.current);
+        progressInterval.current = null;
+      }
+    };
+
     return () => {
       if (audioPlayer.current) {
         audioPlayer.current.pause();
         audioPlayer.current.src = "";
       }
+
+      if (progressInterval.current) {
+        clearInterval(progressInterval.current);
+      }
     };
   }, []);
 
-  // Function to set up the speech synthesizer
-  const setupSynthesizer = (voice: string, pitch: number, speed: number) => {
+  // Real TTS playback implementation using Edge TTS
+  const playTTS = async () => {
     try {
-      // Create the speech config
-      const speechConfig = speechsdk.SpeechConfig.fromSubscription(
-        speechKey,
-        speechRegion,
-      );
+      setIsLoading(true);
 
-      // Set the voice
-      speechConfig.speechSynthesisVoiceName = voice;
-
-      // Create an audio config
-      const audioConfig = speechsdk.AudioConfig.fromDefaultSpeakerOutput();
-
-      // Create the synthesizer
-      const newSynthesizer = new speechsdk.SpeechSynthesizer(
-        speechConfig,
-        audioConfig,
-      );
-
-      synthesizer.current = newSynthesizer;
-      return true;
-    } catch (error) {
-      console.error("Error setting up speech synthesizer:", error);
-      return false;
-    }
-  };
-
-  // Real TTS playback implementation using Microsoft Cognitive Services
-  const playTTS = () => {
-    if (onPlaybackChange) {
-      onPlaybackChange(true);
-    } else {
-      setInternalIsPlaying(true);
-    }
-
-    const currentDialogue = dialogue[currentLineIndex];
-    if (!currentDialogue) return;
-
-    const speaker = currentDialogue.speaker;
-    const text = currentDialogue.text;
-
-    // Get voice settings for the current speaker
-    const settings = voiceSettings[speaker] || {
-      voice: "en-US-AriaNeural",
-      pitch: 1.0,
-      speed: 1.0,
-    };
-
-    // Set up SSML for more control over speech synthesis
-    const ssml = `
-      <speak version="1.0" xmlns="http://www.w3.org/2001/10/synthesis" xml:lang="en-US">
-        <voice name="${settings.voice}">
-          <prosody rate="${settings.speed}" pitch="${settings.pitch > 1 ? "+" : ""}${Math.round((settings.pitch - 1) * 100)}%">
-            ${text}
-          </prosody>
-        </voice>
-      </speak>
-    `;
-
-    try {
-      // Set up the synthesizer with the current speaker's voice settings
-      const success = setupSynthesizer(
-        settings.voice,
-        settings.pitch,
-        settings.speed,
-      );
-
-      if (!success || !synthesizer.current) {
-        console.error("Failed to set up synthesizer");
-        return;
+      if (onPlaybackChange) {
+        onPlaybackChange(true);
+      } else {
+        setInternalIsPlaying(true);
       }
 
-      // Speak the text using SSML
-      synthesizer.current.speakSsmlAsync(
-        ssml,
-        (result) => {
-          if (
-            result.reason === speechsdk.ResultReason.SynthesizingAudioCompleted
-          ) {
-            console.log("Speech synthesis completed");
-            // Audio is automatically played through the default speaker
-          } else {
-            console.error("Speech synthesis failed: " + result.errorDetails);
+      const currentDialogue = dialogue[currentLineIndex];
+      if (!currentDialogue) return;
+
+      const speaker = currentDialogue.speaker;
+      const text = currentDialogue.text;
+
+      // Get voice settings for the current speaker
+      const settings = voiceSettings[speaker] || {
+        voice: "en-US-AriaNeural",
+        pitch: 1.0,
+        speed: 1.0,
+      };
+
+      // Format the pitch and rate values for Edge TTS
+      const pitchValue = formatTTSValue(settings.pitch, "pitch");
+      const rateValue = formatTTSValue(settings.speed, "rate");
+      const volumeValue = formatTTSValue(volume / 100, "volume"); // Normalize volume
+
+      console.log("Generating speech with settings:", {
+        voice: settings.voice,
+        pitch: pitchValue,
+        rate: rateValue,
+        volume: volumeValue,
+        text: text.substring(0, 30) + (text.length > 30 ? "..." : ""),
+      });
+
+      // Generate speech using Edge TTS
+      const { audioUrl } = await generateSpeech(text, {
+        voice: settings.voice,
+        pitch: pitchValue,
+        rate: rateValue,
+        volume: volumeValue,
+      });
+
+      // Play the audio
+      if (audioPlayer.current) {
+        audioPlayer.current.src = audioUrl;
+        audioPlayer.current.volume = volume / 100;
+
+        // Play the audio and handle any errors
+        const playPromise = audioPlayer.current.play();
+        if (playPromise !== undefined) {
+          playPromise.catch((error) => {
+            console.error("Error playing audio:", error);
             if (onPlaybackChange) {
               onPlaybackChange(false);
             } else {
               setInternalIsPlaying(false);
             }
-          }
-        },
-        (error) => {
-          console.error("Error during speech synthesis: " + error);
-          if (onPlaybackChange) {
-            onPlaybackChange(false);
-          } else {
-            setInternalIsPlaying(false);
-          }
-        },
-      );
+          });
+        }
 
-      // Start progress tracking
-      startProgressTracking();
+        // Start progress tracking based on audio duration
+        startProgressTracking();
+      }
     } catch (error) {
       console.error("Error in playTTS:", error);
       if (onPlaybackChange) {
@@ -183,6 +153,8 @@ const TTSController = ({
       } else {
         setInternalIsPlaying(false);
       }
+    } finally {
+      setIsLoading(false);
     }
   };
 
@@ -193,12 +165,13 @@ const TTSController = ({
       setInternalIsPlaying(false);
     }
 
-    if (synthesizer.current) {
-      synthesizer.current.close();
-    }
-
     if (audioPlayer.current) {
       audioPlayer.current.pause();
+    }
+
+    if (progressInterval.current) {
+      clearInterval(progressInterval.current);
+      progressInterval.current = null;
     }
   };
 
@@ -207,10 +180,6 @@ const TTSController = ({
       onPlaybackChange(false);
     } else {
       setInternalIsPlaying(false);
-    }
-
-    if (synthesizer.current) {
-      synthesizer.current.close();
     }
 
     if (audioPlayer.current) {
@@ -223,6 +192,11 @@ const TTSController = ({
     }
 
     setProgress(0);
+
+    if (progressInterval.current) {
+      clearInterval(progressInterval.current);
+      progressInterval.current = null;
+    }
   };
 
   const nextLine = () => {
@@ -235,6 +209,14 @@ const TTSController = ({
         // If currently playing, start playing the next line
         playTTS();
       }
+    } else {
+      // End of dialogue
+      if (onPlaybackChange) {
+        onPlaybackChange(false);
+      } else {
+        setInternalIsPlaying(false);
+      }
+      setProgress(0);
     }
   };
 
@@ -255,28 +237,40 @@ const TTSController = ({
   const startProgressTracking = () => {
     // Reset progress
     setProgress(0);
-  };
 
-  // Track progress during playback
-  useEffect(() => {
-    let interval: NodeJS.Timeout;
-
-    if (isPlaying) {
-      interval = setInterval(() => {
-        setProgress((prev) => {
-          if (prev >= 100) {
-            clearInterval(interval);
-            return 0;
-          }
-          return prev + 2; // Increment by 2% every interval for smoother progress
-        });
-      }, 200); // Update more frequently for smoother progress
+    // Clear any existing interval
+    if (progressInterval.current) {
+      clearInterval(progressInterval.current);
     }
 
-    return () => {
-      if (interval) clearInterval(interval);
-    };
-  }, [isPlaying, currentLineIndex]);
+    // Create a new interval to update progress
+    progressInterval.current = setInterval(() => {
+      if (audioPlayer.current) {
+        const duration = audioPlayer.current.duration;
+        const currentTime = audioPlayer.current.currentTime;
+
+        if (duration > 0) {
+          const progressValue = (currentTime / duration) * 100;
+          setProgress(progressValue);
+
+          // If we're at the end, clear the interval
+          if (progressValue >= 99.5) {
+            if (progressInterval.current) {
+              clearInterval(progressInterval.current);
+              progressInterval.current = null;
+            }
+          }
+        }
+      }
+    }, 100);
+  };
+
+  // Effect to handle volume changes
+  useEffect(() => {
+    if (audioPlayer.current) {
+      audioPlayer.current.volume = volume / 100;
+    }
+  }, [volume]);
 
   // Update the current line in the parent component
   useEffect(() => {

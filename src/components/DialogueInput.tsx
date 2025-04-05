@@ -5,21 +5,37 @@ import { Textarea } from "./ui/textarea";
 import { Card, CardHeader, CardTitle, CardContent } from "./ui/card";
 
 interface DialogueInputProps {
-  onDialogueChange?: (dialogue: string) => void;
+  dialogueText?: string;
+  onTextChange?: (dialogue: string) => void;
 }
 
-const DialogueInput = ({ onDialogueChange = () => {} }: DialogueInputProps) => {
-  const [dialogueText, setDialogueText] = useState<string>(
+const DialogueInput = ({
+  dialogueText: externalDialogueText,
+  onTextChange = () => {},
+}: DialogueInputProps) => {
+  const [internalDialogueText, setInternalDialogueText] = useState<string>(
     "A: Hello there! How are you doing today?\nB: I'm doing great, thanks for asking. How about you?\nA: Pretty good. I've been working on this new project.",
   );
 
+  // Use external state if provided, otherwise use internal state
+  const dialogueText =
+    externalDialogueText !== undefined
+      ? externalDialogueText
+      : internalDialogueText;
+
   useEffect(() => {
-    // Notify parent component when dialogue changes
-    onDialogueChange(dialogueText);
-  }, [dialogueText, onDialogueChange]);
+    // Initialize with default text if external text is empty
+    if (externalDialogueText === "") {
+      onTextChange(internalDialogueText);
+    }
+  }, []);
 
   const handleTextChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
-    setDialogueText(e.target.value);
+    const newText = e.target.value;
+    if (externalDialogueText === undefined) {
+      setInternalDialogueText(newText);
+    }
+    onTextChange(newText);
   };
 
   return (

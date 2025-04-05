@@ -23,6 +23,7 @@
     "class-variance-authority": "^0.7.0",
     "clsx": "^2.1.1",
     "cmdk": "^1.0.4",
+    "edge-tts": "^1.0.1",
     "embla-carousel-react": "^8.5.2",
     "lucide-react": "^0.468.0",
     "microsoft-cognitiveservices-speech-sdk": "^1.43.1",

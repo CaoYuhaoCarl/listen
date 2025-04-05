@@ -32,6 +32,7 @@ export interface VoiceSettings {
 export type VoiceSettingsMap = Record<string, VoiceSettings>;
 
 const AVAILABLE_VOICES = [
+  // English voices
   "en-US-AriaNeural",
   "en-US-GuyNeural",
   "en-US-JennyNeural",
@@ -39,6 +40,15 @@ const AVAILABLE_VOICES = [
   "en-GB-RyanNeural",
   "en-AU-NatashaNeural",
   "en-AU-WilliamNeural",
+  // Chinese voices
+  "zh-CN-XiaoxiaoNeural",
+  "zh-CN-YunxiNeural",
+  "zh-CN-YunjianNeural",
+  "zh-CN-XiaoyiNeural",
+  "zh-CN-YunyangNeural",
+  "zh-TW-HsiaoChenNeural",
+  "zh-TW-YunJheNeural",
+  "zh-TW-HsiaoYuNeural",
 ];
 
 const AVAILABLE_ACCENTS = [
@@ -48,6 +58,8 @@ const AVAILABLE_ACCENTS = [
   "Canadian",
   "Irish",
   "Scottish",
+  "Chinese (Mainland)",
+  "Chinese (Taiwan)",
 ];
 
 const VoiceSettings = ({
